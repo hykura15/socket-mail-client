@@ -1,9 +1,0 @@
-{
-    "rules": [
-      { "type": "sender", "value": "example@example.com", "folder": "Work" },
-      { "type": "subject", "value": "Important", "folder": "Priority" },
-      { "type": "keyword", "value": "meeting", "folder": "Meetings" }
-    ],
-    "default_folder": "Inbox"
-  }
-  
