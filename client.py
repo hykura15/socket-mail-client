@@ -6,7 +6,6 @@ import json
 
 FORMAT = 'utf-8'
 boundary = 'boundary'
-
 def loadConfig():
     config = {}
     try:
@@ -20,14 +19,14 @@ def loadConfig():
 
 config = loadConfig()
 
-def handleSendFile(client, filePaths):
+def handleSendFile(client, filePath):
     try:
         client.sendall(f'--{boundary}\r\n'.encode(FORMAT))
-        with open(filePaths, 'rb') as file:
+        with open(filePath, 'rb') as file:
             fileContent = base64.b64encode(file.read()).decode(FORMAT)
             message = (
-                f'Content-Type: application/octet-stream; name="{os.path.basename(filePaths)}"\r\n'
-                f'Content-Disposition: attachment; filename="{os.path.basename(filePaths)}"\r\n'
+                f'Content-Type: application/octet-stream; name="{os.path.basename(filePath)}"\r\n'
+                f'Content-Disposition: attachment; filename="{os.path.basename(filePath)}"\r\n'
                 f'Content-Transfer-Encoding: base64\r\n\n'
             )
             listFileContents = splitStringIntoChunks(fileContent, 72*5)
@@ -35,11 +34,11 @@ def handleSendFile(client, filePaths):
             for item in listFileContents:
                 client.sendall(f'{item}\r\n'.encode(FORMAT))
     except FileNotFoundError:
-        print(f"Error: File {filePaths} not found.")
+        print(f"Error: File {filePath} not found.")
     except Exception as e:
         print(f"Error while handling file: {e}")
 
-def sendMail(senderMail, recipientMail, ccMail, bccMail, subjectMail, messageBody, attachmentFilePaths):
+def sendMail(senderMail, recipientMail, ccMail, bccMail, subjectMail, messageBody, filePaths):
     try:
         mailServer = config["mailServer"]
         SMTP = config["SMTP"]
@@ -68,7 +67,7 @@ def sendMail(senderMail, recipientMail, ccMail, bccMail, subjectMail, messageBod
         receiveResponse(client)
 
         message = ""
-        if len(attachmentFilePaths) != 0:
+        if len(filePaths) != 0:
             message += (
                 f'MIME-Version: 1.0\r\n'
                 f'Content-Type: multipart/mixed; boundary={boundary}\r\n'
@@ -82,7 +81,7 @@ def sendMail(senderMail, recipientMail, ccMail, bccMail, subjectMail, messageBod
             f'Subject: {subjectMail}\r\n'
         )
         
-        if len(attachmentFilePaths) != 0:
+        if len(filePaths) != 0:
             message += f'\r\n--{boundary}\r\n'
             
         message += (
@@ -92,8 +91,8 @@ def sendMail(senderMail, recipientMail, ccMail, bccMail, subjectMail, messageBod
         )
         client.sendall(message.encode(FORMAT))
 
-        if len(attachmentFilePaths) != 0:
-            for item in attachmentFilePaths:
+        if len(filePaths) != 0:
+            for item in filePaths:
                 handleSendFile(client, item)
             client.sendall(f'--{boundary}--\r\n'.encode(FORMAT))
 
@@ -138,15 +137,17 @@ def receiveMail():
 
         LIST = mailList(client, mailNumber)
 
-        sendCommand(client, f'QUIT\r\n')
-        receiveResponse(client)
+        # sendCommand(client, f'QUIT\r\n')
+        # receiveResponse(client)
 
         return LIST
+    
     except socket.error as e:
         print(f"Socket error: {e}")
     except Exception as e:
         print(f"Error while receiving mail: {e}")
 
+    
 
 def receiveTimeOut(client, timeout=2):
     client.setblocking(0)
@@ -174,11 +175,8 @@ def filterMail(LIST):
     rules = config["rules"]
     for email in LIST["Inbox"]:
         shouldMove = False
-
         for rule in rules:
-            
             filterType = rule["type"]
-            
             if filterType == "from":
                 if any(addr in email[1] for addr in rule["addresses"]):
                     shouldMove = True
@@ -194,74 +192,88 @@ def filterMail(LIST):
             if shouldMove:
                 filteredMails.append(email)
                 LIST[rule["folder"]].append(email)
-                break
+                shouldMove = False
     LIST["Inbox"] = [email for email in LIST["Inbox"] if email not in filteredMails]
     return LIST
 
 def mailList(client, mailNumber):
-    LIST = config["mailFolder"]
-    
+    LIST = {
+        "Inbox": [],
+        "Important": [],
+        "Work": [],
+        "Project": [],
+        "Spam": []
+    }
     if int(mailNumber) == 0:
+        sendCommand(client, f'QUIT\r\n')
+        receiveResponse(client)
         return None
     
-    for num in range(1, int(mailNumber) + 1, 1):
-        client.sendall(f'RETR {num}\r\n'.encode(FORMAT))
-        mailData = receiveTimeOut(client).split('\r\n')
-        _hadFile = 0
-        _indexOf = []
-        _from = ""
-        _subject = ""
-        _body = []
-        _fileNames = []
-        _fileContents = []
-        for index in range(len(mailData)):
-            i = mailData[index].find('filename=')
-            if i != -1:
-                _fileNames.append(mailData[index][i + 10: -1])
-                _fileNames[-1] = _fileNames[-1].replace(' ', '_')
-                _hadFile = 1
-                _indexOf.append(index + 3)
-        bodyStartIndex = 0
-        bodyEndIndex = len(mailData) - 3
-        for index in range(len(mailData)):
-            i = mailData[index].find("From: ")
-            if i != -1:
-                _from = mailData[index][i+6:]
-                _subject = mailData[index + 1][i+9:]
-                if _hadFile == 0:
-                    bodyStartIndex = index + 5
-                else:
-                    bodyStartIndex = index + 7
+    try:
+        newInbox = [] 
+        for num in range(1, int(mailNumber) + 1, 1):
+            client.sendall(f'RETR {num}\r\n'.encode(FORMAT))
+            mailData = receiveTimeOut(client).split('\r\n')
+            _hadFile = 0
+            _indexOf = []
+            _from = ""
+            _subject = ""
+            _body = []
+            _fileNames = []
+            _fileContents = []
+            for index in range(len(mailData)):
+                i = mailData[index].find('filename=')
+                if i != -1:
+                    _fileNames.append(mailData[index][i + 10: -1])
+                    _fileNames[-1] = _fileNames[-1].replace(' ', '_')
+                    _hadFile = 1
+                    _indexOf.append(index + 3)
+            bodyStartIndex = 0
+            bodyEndIndex = len(mailData) - 3
+            for index in range(len(mailData)):
+                i = mailData[index].find("From: ")
+                if i != -1:
+                    _from = mailData[index][i+6:]
+                    _subject = mailData[index + 1][i+9:]
+                    if _hadFile == 0:
+                        bodyStartIndex = index + 5
+                    else:
+                        bodyStartIndex = index + 7
+                
+            if _hadFile != 0:
+                idx = mailData.index(f'--{boundary}', 0)
+                idx = mailData.index(f'--{boundary}', idx + 1)
+                bodyEndIndex = idx
+            _body = mailData[bodyStartIndex:bodyEndIndex]
+            if _hadFile == 1:
+                for j in range(len(_indexOf) - 1):
+                    _fileContents.append(''.join(mailData[_indexOf[j]:_indexOf[j + 1] - 5]))
+                _fileContents.append(''.join(mailData[_indexOf[len(_indexOf) - 1]:len(mailData) - 4]))
             
-        if _hadFile != 0:
-            idx = mailData.index(f'--{boundary}', 0)
-            idx = mailData.index(f'--{boundary}', idx + 1)
-            bodyEndIndex = idx
-        _body = mailData[bodyStartIndex:bodyEndIndex]
-        if _hadFile == 1:
-            for j in range(len(_indexOf) - 1):
-                _fileContents.append(''.join(mailData[_indexOf[j]:_indexOf[j + 1] - 5]))
-            _fileContents.append(''.join(mailData[_indexOf[len(_indexOf) - 1]:len(mailData) - 4]))
-        # print([0, _from, _subject, '\r\n'.join(_body), _fileNames, _fileContents])
-        LIST["Inbox"].append(
-            [0, _from, _subject, '\r\n'.join(_body), _fileNames, _fileContents])
-        client.sendall(f'DELE {num}\r\n'.encode(FORMAT))
-        receiveResponse(client)
-        
-    data = {}
+            LIST["Inbox"].append(["Not Seen",_from, _subject, '\r\n'.join(_body), _fileNames, _fileContents])
+            client.sendall(f'DELE {num}\r\n'.encode(FORMAT))
+            receiveResponse(client)
 
-    newList = filterMail(LIST)
+    except socket.error as e:
+        print(f"Socket error: {e}")
+        
+    sendCommand(client, f'QUIT\r\n')
+    receiveResponse(client)
+
+    data = {}
+    
     with open('data.json', 'r') as file:
         data = json.load(file)
         
+    newList = filterMail(LIST)
+   
     for item in newList:
-        data[item] = data[item] + newList[item] 
+        data[item] = newList[item] + data[item]
 
     with open('data.json', 'w') as file:
         json.dump(data, file, indent=2)
-        
+    
     return data
-
 
 def sendCommand(socket, command):
     socket.sendall(command.encode(FORMAT))
@@ -276,7 +288,7 @@ def receiveResponse(socket):
 
 if __name__ == '__main__':
     try:
-        sendMail()
+        # sendMail()
         receiveMail()
     except Exception as e:
         print(f"An error occurred: {e}")

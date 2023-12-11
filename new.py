@@ -11,18 +11,16 @@ class mailApp:
         self.root = tk.Tk()
         self.root.title("Email App")
         self.frames = {}
-        self.mailData = client.config['mailFolder']
         self.mailBoxWindow = None
         self.senderMailVar = tk.StringVar()
         self.recipientMailVar = tk.StringVar()
         self.ccMailVar = tk.StringVar()
         self.bccMailVar = tk.StringVar()
         self.subjectVar = tk.StringVar()
-        self.attachmentFilePathsVar = tk.StringVar()
+        self.filePathsVar = tk.StringVar()
         self.messageBodyVar = None
-        self.auto_download_id = None
+        self.autoDownloadId = None
         self.autoLoadTime = client.config["autoLoadTime"]
-        # self.config = loadConfig()
         self.createMailApp()
 
     def createMailApp(self):
@@ -66,7 +64,7 @@ class mailApp:
         labelAttachmentFile.grid(row=6, column=0, padx=10, pady=5, sticky=tk.W)
 
         entryAttachmentFile = ttk.Entry(
-            self.root, width=20, textvariable=self.attachmentFilePathsVar)
+            self.root, width=20, textvariable=self.filePathsVar)
         entryAttachmentFile.grid(row=6, column=1, padx=10, pady=5)
 
         buttonAttach = ttk.Button(self.root, text="Attach File", command=self.attachFile)
@@ -78,9 +76,7 @@ class mailApp:
         buttonShowMailBox = ttk.Button(self.root, text="Mail Box", command=self.showMailBox)
         buttonShowMailBox.grid(row=7, column=2, padx=10, pady=5)
 
-        self.auto_download_id = self.root.after(self.autoLoadTime, self.autoDownloadMail) 
-        self.root.mainloop()
-
+        # self.autoDownloadId = self.root.after(self.autoLoadTime, self.autoDownloadMail) 
         self.root.mainloop()
         
     def autoDownloadMail(self):
@@ -88,83 +84,53 @@ class mailApp:
             newData = client.receiveMail()
             if newData is not None:
                 self.showMailList(newData)
-                messagebox.showinfo("Success", "Mail downloaded successfully!")
+                # messagebox.showinfo("Success", "Mail downloaded successfully!")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to download mail. Error: {str(e)}")
+            # messagebox.showerror("Error", f"Failed to download mail. Error: {str(e)}")
+            pass
 
-        self.auto_download_id = self.root.after(self.autoLoadTime, self.autoDownloadMail)
-        
+        self.autoDownloadId = self.root.after(self.autoLoadTime, self.autoDownloadMail)
+    def stopAutoDownloadMail(self):
+        if self.autoDownloadId:
+            self.root.after_cancel(self.autoDownloadId)
+        if self.mailBoxWindow:
+            self.mailBoxWindow.destroy()
+            
     def attachFile(self):
         file_paths = filedialog.askopenfilenames(title="Select Files")
-        self.attachmentFilePathsVar.set(";".join(file_paths))
+        self.filePathsVar.set(";".join(file_paths))
 
     def handleSendMail(self):
+
         senderMail = self.senderMailVar.get()
         recipientMail = self.recipientMailVar.get().split(' ')
         ccMail = self.ccMailVar.get().split(' ')
         bccMail = self.bccMailVar.get().split(' ')
         subject = self.subjectVar.get()
         messageBody = self.messageBodyVar.get("1.0", "end-1c")
-        attachmentFilePaths = self.attachmentFilePathsVar.get()
+        filePaths = self.filePathsVar.get()
         
         if not senderMail or not recipientMail or not subject or not messageBody:
             messagebox.showerror("Error", "Please fill in all required fields.")
             return
         
-        if len(attachmentFilePaths) != 0:
-            attachmentFilePaths = attachmentFilePaths.split(';')
+        if len(filePaths) != 0:
+            filePaths = filePaths.split(';')
         
         try:
             client.sendMail(senderMail, recipientMail, ccMail,
-                            bccMail, subject, messageBody, attachmentFilePaths)
+                            bccMail, subject, messageBody, filePaths)
             messagebox.showinfo("Success", "Email sent successfully!")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to send email. Error: {str(e)}")
-    def showMailBox(self):
-        self.mailBoxWindow = tk.Toplevel()
-        self.mailBoxWindow.title("Mail Box")
-        self.mailBoxWindow.geometry("650x400")
-        
-        for frame in self.frames.values():
-            frame.destroy()
-        try:
-            with open("data.json", 'r') as file:
-                self.mailData = json.load(file)
-            self.showMailList(self.mailData)
-        except:
+            # messagebox.showerror("Error", f"Failed to send email. Error: {str(e)}")
             pass
-            
-        buttonReceive = ttk.Button(self.mailBoxWindow, text="Download Mail", command=self.updateData)
-        buttonReceive.grid(row=1, column=0, pady=5)
-        
-    def showMailList(self, mailData):
-        notebook = ttk.Notebook(self.mailBoxWindow)
-        notebook.grid(row=0, column=0, padx=10, pady=10, sticky=tk.NSEW)
-        folders = ["Inbox", "Important", "Project", "Spam", "Work"]
-        self.frames = {folder: ttk.Frame(notebook) for folder in folders}
-        for folder in folders:
-            notebook.add(self.frames[folder], text=folder)
-            tree = ttk.Treeview(self.frames[folder], columns=("Read", "Sender", "Subject"), show="headings")
-            tree.heading("Read", text="Read")
-            tree.heading("Sender", text="Sender")
-            tree.heading("Subject", text="Subject")
-
-            for email in mailData.get(folder, []):
-                if email[0] == 0:
-                    email[0] = "Read"
-                else:
-                    email[0] = "Not Read"
-                tree.insert("", tk.END, values=email)
-                # print(email)
-
-            tree.bind("<<TreeviewSelect>>", self.onMailSelected)
-            tree.grid(row=0, column=0, padx=10, pady=10, sticky=tk.NSEW)
-
     def onMailSelected(self, event):
         selectedItem = event.widget.selection()[0]
         values = list((event.widget.item(selectedItem, 'values')))
         filePaths = values[-2].split(' ')
         fileContents = values[-1].split(' ')
+        # if values[0] == "Not Seen":
+        #     self.markEmailAsSeen(selectedItem)
         mailContent = tk.Toplevel()
         mailContent.title("Mail Content")
         mailContent.geometry("450x450")
@@ -174,7 +140,7 @@ class mailApp:
         labelMessage.pack()
         if filePaths[0] != '':
             number = len(filePaths)
-            values[3] += f"\nCo {number} files: \n"
+            values[3] += f"\nHave {number} attachments: \n"
             for item in filePaths:
                 values[3] += f'{item}\n'
         
@@ -184,6 +150,21 @@ class mailApp:
         if filePaths[0] != '':
             buttonAttach = ttk.Button(mailContent, text="Download file", command=lambda: self.handleDownloadFile(filePaths, fileContents))
             buttonAttach.pack(padx=10, pady=5)
+    # def markEmailAsSeen(self, selectedItem):
+    #     mailData = self.getMailData() 
+    #     mailData[selectedItem]["Read"] = "seen"
+    #     self.saveMailData(mailData)
+    # def getMailData(self):
+    #     try:
+    #         with open("data.json", 'r') as file:
+    #             mailData = json.load(file)
+    #         return mailData
+    #     except FileNotFoundError:
+    #         return {}
+
+    # def saveMailData(self, mailData):
+    #     with open("data.json", 'w') as file:
+    #         json.dump(mailData, file)
     
     def handleDownloadFile(self, filePaths, fileContents):
         saveFolder = filedialog.askdirectory()
@@ -194,9 +175,10 @@ class mailApp:
                 content = base64.b64decode(fileContents[index])
                 with open(savePath, 'wb') as file:
                     file.write(content)
-                messagebox.showinfo("Success", f"File '{fileName}' downloaded successfully!")
+                # messagebox.showinfo("Success", f"File '{fileName}' downloaded successfully!")
             except Exception as e:
-                messagebox.showerror("Error", f"Failed to download file '{fileName}'. Error: {str(e)}")
+                # messagebox.showerror("Error", f"Failed to download file '{fileName}'. Error: {str(e)}")
+                pass
     def updateData(self):
         try:
             newData = client.receiveMail()
@@ -204,7 +186,46 @@ class mailApp:
                 self.showMailList(newData)
                 messagebox.showinfo("Success", "Mail downloaded successfully!")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to download mail. Error: {str(e)}")
+            # messagebox.showerror("Error", f"Failed to download mail. Error: {str(e)}")
+            pass
         
+    def showMailBox(self):
+        self.mailBoxWindow = tk.Toplevel()
+        self.mailBoxWindow.title("Mail Box")
+        self.mailBoxWindow.geometry("650x400")
+        
+        for frame in self.frames.values():
+            frame.destroy()
+        try:
+            with open("data.json", 'r') as file:
+                mailData = json.load(file)
+            self.showMailList(mailData)
+        except:
+            pass
+        buttonReceive = ttk.Button(self.mailBoxWindow, text="Download Mail", command=self.updateData)
+        buttonReceive.grid(row=1, column=0, pady=5)
+        self.autoDownloadMail()
+        self.mailBoxWindow.protocol("WM_DELETE_WINDOW", self.stopAutoDownloadMail)
+        
+    def showMailList(self, mailData):
+        notebook = ttk.Notebook(self.mailBoxWindow)
+        notebook.grid(row=0, column=0, padx=10, pady=10, sticky=tk.NSEW)
+        folders = ["Inbox", "Important", "Project", "Spam", "Work"]
+        self.frames = {folder: ttk.Frame(notebook) for folder in folders}
+        for folder in folders:
+            notebook.add(self.frames[folder], text=folder)
+            # tree = ttk.Treeview(self.frames[folder], columns=("Sender", "Subject"), show="headings")
+            tree = ttk.Treeview(self.frames[folder], columns=("Read", "Sender", "Subject"), show="headings")
+            tree.heading("Read", text="Read")
+            tree.heading("Sender", text="Sender")
+            tree.heading("Subject", text="Subject")
+
+            for email in mailData.get(folder, []):
+                tree.insert("", tk.END, values=email)
+
+            tree.bind("<<TreeviewSelect>>", self.onMailSelected)
+            tree.grid(row=0, column=0, padx=10, pady=10, sticky=tk.NSEW)
+
+
 if __name__ == "__main__":
     app = mailApp()
