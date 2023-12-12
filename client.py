@@ -3,6 +3,7 @@ import socket
 import os
 import time
 import json
+import uuid
 
 FORMAT = 'utf-8'
 boundary = 'boundary'
@@ -18,6 +19,9 @@ def loadConfig():
     return config
 
 config = loadConfig()
+
+def generateRandomID():
+    return str(uuid.uuid4().hex)
 
 def handleSendFile(client, filePath):
     try:
@@ -135,12 +139,12 @@ def receiveMail():
         sendCommand(client, f'UIDL\r\n')
         receiveResponse(client)
 
-        LIST = mailList(client, mailNumber)
+        mailData = mailList(client, mailNumber)
 
         # sendCommand(client, f'QUIT\r\n')
         # receiveResponse(client)
 
-        return LIST
+        return mailData
     
     except socket.error as e:
         print(f"Socket error: {e}")
@@ -170,34 +174,34 @@ def receiveTimeOut(client, timeout=2):
             pass
     return b''.join(totalData).decode(FORMAT)
 
-def filterMail(LIST):
+def filterMail(mailData):
     filteredMails = []
     rules = config["rules"]
-    for email in LIST["Inbox"]:
+    for email in mailData["Inbox"]:
         shouldMove = False
         for rule in rules:
             filterType = rule["type"]
             if filterType == "from":
-                if any(addr in email[1] for addr in rule["addresses"]):
+                if any(addr in email["from"] for addr in rule["addresses"]):
                     shouldMove = True
             elif filterType == "subject":
-                if any(keyword in email[2] for keyword in rule["keywords"]):
+                if any(keyword in email["subject"] for keyword in rule["keywords"]):
                     shouldMove = True
             elif filterType == "content":
-                if any(keyword in email[3] for keyword in rule["keywords"]):
+                if any(keyword in email["content"] for keyword in rule["keywords"]):
                     shouldMove = True
             elif filterType == "spam":
-                if any(keyword in email[2] or keyword in email[3] for keyword in rule["keywords"]):
+                if any(keyword in email["subject"] or keyword in email["content"] for keyword in rule["keywords"]):
                     shouldMove = True
             if shouldMove:
                 filteredMails.append(email)
-                LIST[rule["folder"]].append(email)
+                mailData[rule["folder"]].append(email)
                 shouldMove = False
-    LIST["Inbox"] = [email for email in LIST["Inbox"] if email not in filteredMails]
-    return LIST
+    mailData["Inbox"] = [email for email in mailData["Inbox"] if email not in filteredMails]
+    return mailData
 
 def mailList(client, mailNumber):
-    LIST = {
+    mailData = {
         "Inbox": [],
         "Important": [],
         "Work": [],
@@ -210,10 +214,9 @@ def mailList(client, mailNumber):
         return None
     
     try:
-        newInbox = [] 
         for num in range(1, int(mailNumber) + 1, 1):
             client.sendall(f'RETR {num}\r\n'.encode(FORMAT))
-            mailData = receiveTimeOut(client).split('\r\n')
+            mailContent = receiveTimeOut(client).split('\r\n')
             _hadFile = 0
             _indexOf = []
             _from = ""
@@ -221,54 +224,55 @@ def mailList(client, mailNumber):
             _body = []
             _fileNames = []
             _fileContents = []
-            for index in range(len(mailData)):
-                i = mailData[index].find('filename=')
+            for index in range(len(mailContent)):
+                i = mailContent[index].find('filename=')
                 if i != -1:
-                    _fileNames.append(mailData[index][i + 10: -1])
+                    _fileNames.append(mailContent[index][i + 10: -1])
                     _fileNames[-1] = _fileNames[-1].replace(' ', '_')
                     _hadFile = 1
                     _indexOf.append(index + 3)
             bodyStartIndex = 0
-            bodyEndIndex = len(mailData) - 3
-            for index in range(len(mailData)):
-                i = mailData[index].find("From: ")
+            bodyEndIndex = len(mailContent) - 3
+            for index in range(len(mailContent)):
+                i = mailContent[index].find("From: ")
                 if i != -1:
-                    _from = mailData[index][i+6:]
-                    _subject = mailData[index + 1][i+9:]
+                    _from = mailContent[index][i+6:]
+                    _subject = mailContent[index + 1][i+9:]
                     if _hadFile == 0:
                         bodyStartIndex = index + 5
                     else:
                         bodyStartIndex = index + 7
                 
             if _hadFile != 0:
-                idx = mailData.index(f'--{boundary}', 0)
-                idx = mailData.index(f'--{boundary}', idx + 1)
+                idx = mailContent.index(f'--{boundary}', 0)
+                idx = mailContent.index(f'--{boundary}', idx + 1)
                 bodyEndIndex = idx
-            _body = mailData[bodyStartIndex:bodyEndIndex]
+            _body = mailContent[bodyStartIndex:bodyEndIndex]
             if _hadFile == 1:
                 for j in range(len(_indexOf) - 1):
-                    _fileContents.append(''.join(mailData[_indexOf[j]:_indexOf[j + 1] - 5]))
-                _fileContents.append(''.join(mailData[_indexOf[len(_indexOf) - 1]:len(mailData) - 4]))
-            
-            LIST["Inbox"].append(["Not Seen",_from, _subject, '\r\n'.join(_body), _fileNames, _fileContents])
+                    _fileContents.append(''.join(mailContent[_indexOf[j]:_indexOf[j + 1] - 5]))
+                _fileContents.append(''.join(mailContent[_indexOf[len(_indexOf) - 1]:len(mailContent) - 4]))
+            # print(_fileNames)
+            mailData["Inbox"].append({"status":"Not Seen", "from":_from, 
+                                   "subject": _subject, "content": '\r\n'.join(_body), 
+                                   "fileNames":_fileNames, "fileContents":_fileContents,"id": generateRandomID()})
             client.sendall(f'DELE {num}\r\n'.encode(FORMAT))
             receiveResponse(client)
-
     except socket.error as e:
         print(f"Socket error: {e}")
         
     sendCommand(client, f'QUIT\r\n')
     receiveResponse(client)
-
+    
     data = {}
     
     with open('data.json', 'r') as file:
         data = json.load(file)
         
-    newList = filterMail(LIST)
+    newMailData = filterMail(mailData)
    
-    for item in newList:
-        data[item] = newList[item] + data[item]
+    for item in newMailData:
+        data[item] = newMailData[item] + data[item]
 
     with open('data.json', 'w') as file:
         json.dump(data, file, indent=2)
